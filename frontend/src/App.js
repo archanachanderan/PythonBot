@@ -21,46 +21,101 @@ function App() {
 
   // Send message
   const sendMessage = async (msgText) => {
-    const msg = msgText || input;
+  const msg = msgText || input;
 
-    if (!msg.trim() || isLoading) return;
+  if (!msg.trim() || isLoading) return;
 
-    setInput("");
-    setIsLoading(true);
+  setInput("");
+  setIsLoading(true);
 
-    // show user message instantly
-    setMessages(prev => [...prev, { role: "user", content: msg }]);
+  // show user message instantly
+  setMessages(prev => [
+    ...prev,
+    { role: "user", content: msg }
+  ]);
 
-    try {
-      const res = await fetch(`${API_BASE}/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: msg,
-          history: history,
-          use_lora: useLora,
-        }),
-      });
+  // empty bot message for streaming
+  let botIndex;
 
-      const data = await res.json();
+  setMessages(prev => {
+    botIndex = prev.length + 1;
 
-      // show bot response
-      setMessages(prev => [
-        ...prev,
-        { role: "bot", content: data.response || "No response" },
-      ]);
+    return [
+      ...prev,
+      { role: "bot", content: "" }
+    ];
+  });
 
-      if (data.history) setHistory(data.history);
+  try {
+    const res = await fetch(`${API_BASE}/chat/stream`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        message: msg,
+        history: history,
+        use_lora: useLora
+      })
+    });
 
-    } catch (err) {
-      setMessages(prev => [
-        ...prev,
-        { role: "bot", content: "Error: " + err.message },
-      ]);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+
+    let fullText = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+
+      if (done) break;
+
+      const chunk = decoder.decode(value);
+
+      const lines = chunk.split("\n");
+
+      for (let line of lines) {
+        if (line.startsWith("data: ")) {
+
+          const token = line.replace("data: ", "");
+
+          if (token === "[DONE]") break;
+
+          fullText += token;
+
+          setMessages(prev => {
+            const updated = [...prev];
+
+            updated[updated.length - 1] = {
+              role: "bot",
+              content: fullText
+            };
+
+            return updated;
+          });
+        }
+      }
     }
 
-    setIsLoading(false);
-  };
+    setHistory(prev => [
+      ...prev,
+      { role: "user", content: msg },
+      { role: "assistant", content: fullText }
+    ]);
+
+  } catch (err) {
+
+    setMessages(prev => [
+      ...prev,
+      {
+        role: "bot",
+        content: "Error: " + err.message
+      }
+    ]);
+
+  }
+
+  setIsLoading(false);
+};
 
   const clearChat = () => {
     setMessages([]);
@@ -159,18 +214,6 @@ function App() {
                 </div>
               </div>
             ))}
-
-            {/* LOADING */}
-            {isLoading && (
-              <div className="msg bot">
-                <div className="avatar">PB</div>
-                <div className="bubble">
-                  <div className="typing">
-                    <span></span><span></span><span></span>
-                  </div>
-                </div>
-              </div>
-            )}
 
           </div>
 

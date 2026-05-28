@@ -4,13 +4,16 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
-from db import conn, cursor
+from db import get_connection
 import uvicorn
 import os
-
 from model import get_model
+
+conn = get_connection()
+cursor = conn.cursor()
 
 # Load model once
 tutor_instance = None
@@ -125,6 +128,18 @@ def history():
         {"role": r[0], "content": r[1]}
         for r in rows
     ]
+
+@app.post("/chat/stream")
+def chat_stream(req: ChatRequest):
+    tutor = get_model(req.use_lora)
+    history = [m.dict() for m in req.history]
+
+    def event_generator():
+        for token in tutor.generate_stream(req.message, history):
+            yield f"data: {token}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000)

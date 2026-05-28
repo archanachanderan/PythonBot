@@ -1,13 +1,53 @@
-# model.py — Model loading and inference (supports both base & fine-tuned)
-
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig, pipeline
 from peft import PeftModel
 import os
+from threading import Thread
+from transformers import TextIteratorStreamer
 from config import BASE_MODEL, ADAPTER_PATH, MAX_NEW_TOKENS, TEMPERATURE, TOP_P, SYSTEM_PROMPT
 
 
 class PythonTutorModel:
+    @torch.inference_mode()
+    def generate_stream(self, user_message: str, history: list[dict] = []):
+        history = history[-1:]  # keep small for speed
+
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+        for msg in history:
+            messages.append(msg)
+
+        messages.append({"role": "user", "content": user_message})
+
+        text = self.tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True
+        )
+
+        inputs = self.tokenizer(text, return_tensors="pt").to(self.model.device)
+
+        streamer = TextIteratorStreamer(
+        self.tokenizer,
+        skip_prompt=True,
+        skip_special_tokens=True
+    )
+
+        thread = Thread(target=self.model.generate, kwargs={
+        **inputs,
+        "max_new_tokens": MAX_NEW_TOKENS,
+        "temperature": TEMPERATURE,
+        "top_p": TOP_P,
+        "do_sample": False,
+        "streamer": streamer,
+        "use_cache": True,
+    })
+
+        thread.start()
+
+        for token in streamer:
+            yield token
+            
     def __init__(self, use_lora: bool = True):
         """
         use_lora=True  → loads base model + your fine-tuned LoRA adapter
@@ -18,14 +58,16 @@ class PythonTutorModel:
         self._load()
 
         self.model.eval()
+        torch.inference_mode()
         print("Device:", self.model.device)
+
 
     def _load(self):
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_use_double_quant=True,
             bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_compute_dtype=torch.float16,
         )
 
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -107,8 +149,8 @@ class PythonTutorModel:
     max_new_tokens=MAX_NEW_TOKENS,
     temperature=TEMPERATURE,
     top_p=TOP_P,
-    do_sample=True,
-    repetition_penalty=1.1,
+    do_sample=False,
+    repetition_penalty=1.0,
     use_cache=True,
     pad_token_id=self.tokenizer.eos_token_id,
 )

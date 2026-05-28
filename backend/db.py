@@ -1,11 +1,10 @@
 import psycopg2
 
-conn = psycopg2.connect(
-    host="db.rdsukgjfqdobiltdbasn.supabase.co",
-    database="postgres",
-    user="postgres",
-    password="Pythonbot@21042026",
-    port=5432
-)
-
-cursor = conn.cursor()
+def get_connection():
+    return psycopg2.connect(
+        host="aws-1-ap-northeast-1.pooler.supabase.com",
+        database="postgres",
+        user="postgres.rdsukgjfqdobiltdbasn",
+        password="Pythonbot@21042026",
+        port=5432
+    )
